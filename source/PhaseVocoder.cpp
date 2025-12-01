@@ -1,0 +1,229 @@
+#include "PhaseVocoder.h"
+
+PhaseVocoder::PhaseVocoder(int fftSizeIn, double sampleRateIn, int numChannelsIn)
+{
+    N = fftSizeIn;
+    sampleRate = sampleRateIn;
+    numChannels = numChannelsIn;
+    prepare(N, sampleRate, numChannels);
+}
+
+void PhaseVocoder::prepare(int fftSizeIn, double sampleRateIn, int numChannelsIn)
+{
+    // DBG("PhaseVocoder::prepare() entered");
+
+    inputCircBuff.clear();
+    outputCircBuff.clear();
+
+    N = fftSizeIn;
+    sampleRate = sampleRateIn;
+    numChannels = numChannelsIn;
+
+    float smoothPSR = pitchShiftRatioSmoothed.getCurrentValue();
+
+    analysisHopSize  = N / 4;
+    synthesisHopSize = int(analysisHopSize * smoothPSR);
+
+    pitchShiftRatioSmoothed.reset(sampleRate, 0.0005f);
+    // pitchShiftRatioSmoothed.setCurrentAndTargetValue(smoothPSR);
+
+    int minBufferSize = 2 * N + analysisHopSize * 4 * 2; // extra *2 is from max(synthesisHopSize, analysisHopSize) = 2* analysisHopSize
+
+    int fftOrder = (int) std::round(std::log2(N));
+    fft = std::make_unique<juce::dsp::FFT>(fftOrder);
+
+    // Resize arrays
+    window.resize(N);
+    dataTemp.assign(2 * N, 0.0f);
+    centerFreqs.resize(N/2 + 1);
+
+    phasePrev.assign(numChannels, std::vector<float>(N/2 + 1));
+    magPrev.assign(numChannels, std::vector<float>(N/2 + 1));
+    deltaPhase.assign(numChannels, std::vector<float>(N/2 + 1));
+    synthesisPhase.assign(numChannels, std::vector<float>(N/2 + 1));
+
+    for (int ch = 0; ch < numChannels; ++ch)
+    {
+        std::fill(synthesisPhase[ch].begin(), synthesisPhase[ch].end(), 0.0f);
+        std::fill(phasePrev[ch].begin(),      phasePrev[ch].end(),      0.0f);
+        std::fill(deltaPhase[ch].begin(),     deltaPhase[ch].end(),     0.0f);
+        std::fill(magPrev[ch].begin(),        magPrev[ch].end(),        0.0f);
+    }
+
+    inputCircBuff.setSize(numChannels, minBufferSize);
+    outputCircBuff.setSize(numChannels, minBufferSize);
+
+    inputWritePos = inputReadPos = 0;
+    outputWritePos = outputReadPos = 0;
+    samplesAccumulated = 0;
+
+    // Hann window
+    // Add choice of window function?
+    sumSquared = 0.0f;
+    for (int n = 0; n < N; ++n)
+    {
+        float win = 0.5f * (1.0f - std::cos(2.0f * pi * n / (N - 1)));
+        window[n] = win;
+        sumSquared += win * win;
+    }
+
+    normFactor = 1.0f / (sumSquared / synthesisHopSize);
+
+    for (int k = 0; k <= N/2; ++k)
+        centerFreqs[k] = (2.0f * pi * k) / N; // in rad/sample
+}
+
+void PhaseVocoder::process(juce::AudioBuffer<float>& buffer)
+{
+    const int numSamples = buffer.getNumSamples();
+    const int circSize   = inputCircBuff.getNumSamples();
+    const int channels   = buffer.getNumChannels();
+
+    float smoothPSR = pitchShiftRatioSmoothed.getCurrentValue();
+    
+    // // If ratio changed, reset state
+    // if (pitchShiftRatio != lastpitchShiftRatio)
+    // {
+    //     for (int ch = 0; ch < numChannels; ++ch)
+    //     {
+    //         std::fill(synthesisPhase[ch].begin(), synthesisPhase[ch].end(), 0.0f);
+    //         std::fill(phasePrev[ch].begin(),      phasePrev[ch].end(),      0.0f);
+    //         std::fill(deltaPhase[ch].begin(),     deltaPhase[ch].end(),     0.0f);
+    //         std::fill(magPrev[ch].begin(),        magPrev[ch].end(),        0.0f);
+    //     }
+        
+    //     inputWritePos 
+    //     = inputReadPos 
+    //     = outputWritePos 
+    //     = outputReadPos 
+    //     = samplesAccumulated 
+    //     = 0;
+
+    //     pitchShiftRatioSmoothed.setTargetValue(pitchShiftRatio);
+    //     lastpitchShiftRatio = pitchShiftRatio;
+    // }
+
+    // synthesisHopSize = int(analysisHopSize / pitchShiftRatio);
+    synthesisHopSize = int(analysisHopSize * smoothPSR);
+    normFactor = 1.0f / (sumSquared / synthesisHopSize);
+    // DBG("pitchShiftRatio = " << pitchShiftRatio);
+
+    // Write input into circular buffer
+    for (int i = 0; i < numSamples; ++i)
+    {
+        for (int ch = 0; ch < channels; ++ch)
+            inputCircBuff.setSample(ch, inputWritePos, buffer.getSample(ch, i));
+
+        inputWritePos = (inputWritePos + 1) % circSize;
+        samplesAccumulated++;
+    }
+
+    // Do vocoder analysis/synthesis whenever enough samples accumulated
+    while (samplesAccumulated >= analysisHopSize)
+    {
+        smoothPSR = pitchShiftRatioSmoothed.getNextValue();
+
+        for (int ch = 0; ch < channels; ++ch)
+        {
+            // Load frame
+            for (int n = 0; n < N; ++n)
+            {
+                int pos = (inputReadPos + n) % circSize;
+                dataTemp[n] = inputCircBuff.getSample(ch, pos) * window[n];
+            }
+
+            std::fill(dataTemp.begin() + N, dataTemp.end(), 0.0f);
+
+            // FFT
+            fft->performRealOnlyForwardTransform(dataTemp.data());
+
+            // Process bins
+            for (int k = 0; k <= N/2; ++k)
+            {
+                float real = dataTemp[2*k];
+                float imag = dataTemp[2*k + 1];
+
+                float mag   = std::sqrt(real*real + imag*imag);
+                float phase = std::atan2(imag, real);
+
+                // // Robotization:
+                // if(robotization)
+                //  synthesisPhase[ch][k] = 0.0f;
+
+                // // Whisperization:
+                // if (whisperization)
+                //  synthesisPhase[ch][k] = <random value in [0,2pi)>
+                // then skip the rest if
+
+                float omega = centerFreqs[k];
+                float targetPhase = phasePrev[ch][k] + analysisHopSize * omega;
+
+                float deviation = phase - targetPhase;
+                float deltaPhi = omega * analysisHopSize + princArg(deviation);
+
+                // deltaPhase[ch][k] = deltaPhi;
+
+                // float instFreq = deltaPhi / analysisHopSize;
+                synthesisPhase[ch][k] = princArg(synthesisPhase[ch][k] + deltaPhi * smoothPSR);
+
+                // // TIME STRETCHING:
+                // synthesisPhase[ch][k] += omega * synthesisHopSize;
+
+                // Comment these out for no-op
+                dataTemp[2*k]     = mag * std::cos(synthesisPhase[ch][k]);
+                dataTemp[2*k + 1] = mag * std::sin(synthesisPhase[ch][k]);
+
+                phasePrev[ch][k] = phase;
+            }
+
+            // IFFT
+            fft->performRealOnlyInverseTransform(dataTemp.data());
+
+            // Resample to match original duration
+            double outputLength = floor(N / smoothPSR);
+            if ((int)tempResampled.size() < outputLength)
+                tempResampled.resize(outputLength);
+
+            for (int n = 0; n < outputLength; ++n)
+            {
+                double x = double(n) * N / outputLength;
+                int ix = (int)std::floor(x);
+                float dx = float(x - ix);
+
+                float s0 = dataTemp[ix];
+                float s1 = dataTemp[(ix + 1) % N];
+
+                tempResampled[n] = s0 + dx * (s1 - s0);
+            }
+
+            // OLA
+            for (int n = 0; n < outputLength; ++n)
+            {
+                int pos = (outputWritePos + n) % circSize;
+                float prev = outputCircBuff.getSample(ch, pos);
+
+                // Window applied using n mapped to Hann domain
+                // Must index window proportionally
+                int winIndex = int((double)n / outputLength * N);
+                winIndex = juce::jlimit(0, N-1, winIndex);
+                outputCircBuff.setSample(ch, pos, prev + tempResampled[n] * window[winIndex] * normFactor);
+            }
+        }
+
+        inputReadPos  = (inputReadPos  + analysisHopSize)  % circSize;
+        outputWritePos = (outputWritePos + analysisHopSize) % circSize;
+        samplesAccumulated -= analysisHopSize;
+    }
+
+    // Output ready samples
+    for (int i = 0; i < numSamples; ++i)
+    {
+        for (int ch = 0; ch < channels; ++ch)
+        {
+            float v = outputCircBuff.getSample(ch, outputReadPos);
+            buffer.setSample(ch, i, v);
+            outputCircBuff.setSample(ch, outputReadPos, 0.0f);
+        }
+        outputReadPos = (outputReadPos + 1) % circSize;
+    }
+}

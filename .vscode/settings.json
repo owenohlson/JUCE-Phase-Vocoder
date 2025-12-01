@@ -46,6 +46,21 @@
         "variant": "cpp",
         "vector": "cpp",
         "memory": "cpp",
-        "algorithm": "cpp"
+        "algorithm": "cpp",
+        "__locale": "cpp",
+        "bitset": "cpp",
+        "cctype": "cpp",
+        "charconv": "cpp",
+        "clocale": "cpp",
+        "codecvt": "cpp",
+        "cstdarg": "cpp",
+        "cstdio": "cpp",
+        "cwctype": "cpp",
+        "forward_list": "cpp",
+        "fstream": "cpp",
+        "print": "cpp",
+        "regex": "cpp",
+        "shared_mutex": "cpp",
+        "stack": "cpp"
     }
 }

@@ -1,0 +1,22 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Launch Phase Vocoder (LLDB)",
+      "type": "lldb",
+      "request": "launch",
+      "program": "${workspaceFolder}/build/PhaseVocoder_artefacts/Debug/Standalone/Phase Vocoder.app/Contents/MacOS/Phase Vocoder",
+      "args": [],
+      "cwd": "${workspaceFolder}",
+      "stopOnEntry": false,
+      "preLaunchTask": "cmake-build",
+      "terminal": "integrated",
+      "preRunCommands": [
+        "breakpoint name configure --disable cpp_exception"
+      ],
+      "initCommands": [
+        "settings set target.run-args \"\""
+      ]
+    }
+  ]
+}

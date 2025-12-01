@@ -1,9 +1,35 @@
 #pragma once
 
 #include <JuceHeader.h>
+#include "PhaseVocoder.h"
+
+class PhaseVocoder;
+
+//=================================================================================
+class VocoderBuilderThread : public juce::Thread
+{
+public:
+    VocoderBuilderThread(std::function<void()> taskToRun)
+        : juce::Thread("Vocoder Builder Thread"), task(taskToRun) {}
+
+    void run() override
+    {
+        while (! threadShouldExit())
+        {
+            wait(-1); // Wait until signaled
+            if (threadShouldExit()) break;
+
+            if (task) task(); // Build vocoder
+        }
+    }
+
+private:
+    std::function<void()> task;
+};
 
 //==============================================================================
-class PhaseVocoderAudioProcessor final : public juce::AudioProcessor
+class PhaseVocoderAudioProcessor final : public juce::AudioProcessor,
+                                         public juce::AudioProcessorValueTreeState::Listener
 {
 public:
     //==============================================================================
@@ -11,7 +37,7 @@ public:
     ~PhaseVocoderAudioProcessor() override;
 
     //==============================================================================
-    void prepareToPlay (double sampleRate, int samplesPerBlock) override;
+    void prepareToPlay (double sampleRateIn, int samplesPerBlockIn) override;
     void releaseResources() override;
 
     bool isBusesLayoutSupported (const BusesLayout& layouts) const override;
@@ -42,7 +68,46 @@ public:
     void getStateInformation (juce::MemoryBlock& destData) override;
     void setStateInformation (const void* data, int sizeInBytes) override;
 
-private:
     //==============================================================================
+    // void rebuildEngineInBackground();
+
+    juce::UndoManager undoManager;
+    static juce::AudioProcessorValueTreeState::ParameterLayout createParameterLayout();
+    juce::AudioProcessorValueTreeState apvts {*this, &undoManager, "Parameters", createParameterLayout()};
+
+    std::atomic<bool> fftResizePending { false };
+    int newFFTSize;
+
+    void parameterChanged(const String& parameterID, float newValue) override
+    {
+        if (parameterID == "FFT_SIZE")
+        {
+            fftResizePending = true;
+
+            auto* p = dynamic_cast<AudioParameterChoice*>(apvts.getParameter("FFT_SIZE"));
+            newFFTSize = p->getCurrentChoiceName().getIntValue();
+            DBG("Parameter " << parameterID << " changed to " << newFFTSize);
+
+            // // Stop audio processing safely
+            // suspendProcessing(true);
+
+            // // Rebuild synchronously
+            // engine = std::make_unique<PhaseVocoder>(N, sampleRate, numChannels);
+
+            // // Resume audio processing
+            // suspendProcessing(false);
+        }
+    }
+
+    //==============================================================================
+    // Engine pointer
+    std::unique_ptr<PhaseVocoder> engine;
+
+private:
+    double sampleRate;
+    int samplesPerBlock;
+    int numChannels;
+    int N;
+
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (PhaseVocoderAudioProcessor)
 };

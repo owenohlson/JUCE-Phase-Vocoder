@@ -19,5 +19,14 @@ private:
     // access the processor object that created it.
     PhaseVocoderAudioProcessor& processorRef;
 
+    // juce::ComboBox mode;
+    juce::Slider pitchShiftRatioSlider;
+    juce::ComboBox fftSizeComboBox;
+
+    juce::Label pitchShiftRatioLabel, fftSizeLabel;
+
+    std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> pitchShiftRatioAttachment;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::ComboBoxAttachment> fftSizeAttachment;
+
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (PhaseVocoderAudioProcessorEditor)
 };

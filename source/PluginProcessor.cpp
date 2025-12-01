@@ -10,8 +10,10 @@ PhaseVocoderAudioProcessor::PhaseVocoderAudioProcessor()
                       #endif
                        .withOutput ("Output", juce::AudioChannelSet::stereo(), true)
                      #endif
-                       )
+                       ), 
+                       apvts(*this, &undoManager, "Parameters", createParameterLayout())
 {
+    apvts.addParameterListener("FFT_SIZE", this);
 }
 
 PhaseVocoderAudioProcessor::~PhaseVocoderAudioProcessor()
@@ -84,10 +86,19 @@ void PhaseVocoderAudioProcessor::changeProgramName (int index, const juce::Strin
 }
 
 //==============================================================================
-void PhaseVocoderAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
+void PhaseVocoderAudioProcessor::prepareToPlay (double sampleRateIn, int samplesPerBlockIn)
 {
-    // Use this method as the place to do any pre-playback
-    // initialisation that you need..
+    sampleRate = sampleRateIn;
+
+    numChannels = getTotalNumInputChannels();
+
+    // Get choice indices for fftSize
+    auto* p = dynamic_cast<AudioParameterChoice*>(apvts.getParameter("FFT_SIZE"));
+    N = p->getCurrentChoiceName().getIntValue();
+
+    // Rebuild the engine synchronously
+    engine = std::make_unique<PhaseVocoder>(N, sampleRate, numChannels);
+
     juce::ignoreUnused (sampleRate, samplesPerBlock);
 }
 
@@ -125,32 +136,22 @@ void PhaseVocoderAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
                                               juce::MidiBuffer& midiMessages)
 {
     juce::ignoreUnused (midiMessages);
-
     juce::ScopedNoDenormals noDenormals;
-    auto totalNumInputChannels  = getTotalNumInputChannels();
-    auto totalNumOutputChannels = getTotalNumOutputChannels();
 
-    // In case we have more outputs than inputs, this code clears any output
-    // channels that didn't contain input data, (because these aren't
-    // guaranteed to be empty - they may contain garbage).
-    // This is here to avoid people getting screaming feedback
-    // when they first compile a plugin, but obviously you don't need to keep
-    // this code if your algorithm always overwrites all the output channels.
-    for (auto i = totalNumInputChannels; i < totalNumOutputChannels; ++i)
-        buffer.clear (i, 0, buffer.getNumSamples());
-
-    // This is the place where you'd normally do the guts of your plugin's
-    // audio processing...
-    // Make sure to reset the state if your inner loop is processing
-    // the samples and the outer loop is handling the channels.
-    // Alternatively, you can process the samples with the channels
-    // interleaved by keeping the same state.
-    for (int channel = 0; channel < totalNumInputChannels; ++channel)
+    if (engine == nullptr)
     {
-        auto* channelData = buffer.getWritePointer (channel);
-        juce::ignoreUnused (channelData);
-        // ..do something to the data...
+        buffer.clear();
+        return;
     }
+
+    // Update pitch shift ratio
+    float psr = *apvts.getRawParameterValue("PITCH_SHIFT_RATIO");
+    engine->pitchShiftRatioSmoothed.setTargetValue(psr);
+
+    if (fftResizePending.exchange(false))
+        engine->prepare(N, sampleRate, numChannels);
+    
+    engine->process(buffer);
 }
 
 //==============================================================================
@@ -162,6 +163,31 @@ bool PhaseVocoderAudioProcessor::hasEditor() const
 juce::AudioProcessorEditor* PhaseVocoderAudioProcessor::createEditor()
 {
     return new PhaseVocoderAudioProcessorEditor (*this);
+}
+
+//==============================================================================
+juce::AudioProcessorValueTreeState::ParameterLayout PhaseVocoderAudioProcessor::createParameterLayout()
+{
+    std::vector<std::unique_ptr<juce::RangedAudioParameter>> params;
+    // layout.add (std::make_unique<AudioParameterChoice> ("mode", "PV Mode", StringArray {"Time Stretch", "Pitch Shift"}, 0));
+    params.push_back(std::make_unique<juce::AudioParameterFloat>(
+        ParameterID {"PITCH_SHIFT_RATIO", 1},  // param ID
+        "Pitch Shift Ratio", // parameter name
+        0.5f, // min value
+        2.0f, // max value
+        1.0f // default value
+    ));
+
+    params.push_back(std::make_unique<juce::AudioParameterChoice>(
+        ParameterID {"FFT_SIZE", 1},  // param ID
+        "FFT Size", // param name
+        StringArray {"1024", "2048", "4096"}, // choices
+        1 // default choice
+    ));
+
+    // ...
+
+    return { params.begin(), params.end() };
 }
 
 //==============================================================================
