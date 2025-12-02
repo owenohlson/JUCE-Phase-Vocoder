@@ -7,6 +7,30 @@ PhaseVocoderAudioProcessorEditor::PhaseVocoderAudioProcessorEditor (PhaseVocoder
 {
     auto& apvts = processorRef.apvts;
 
+    // Mode selector
+    modeSelector.addItem("Pitch Shift", 1);
+    modeSelector.addItem("Robotize", 2);
+    modeSelector.addItem("Whisperize", 3);
+    modeSelector.setSelectedId(1); // default mode
+    addAndMakeVisible(modeSelector);
+
+    modeLabel.setText("Mode", juce::dontSendNotification);
+    modeLabel.attachToComponent(&modeSelector, true); // attach to left
+    addAndMakeVisible(modeLabel);
+
+    // Connect to APVTS for parameter automation
+    modeAttachment = std::make_unique<juce::AudioProcessorValueTreeState::ComboBoxAttachment>(
+        apvts,
+        "MODE",
+        modeSelector
+    );
+
+    // Reactive behavior when user changes mode
+    modeSelector.onChange = [this]() { updateModeUI(); };
+
+    // Call it once to set initial visibility
+    updateModeUI();
+
     // Pitch shift ratio slider
     pitchShiftRatioAttachment = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(
         apvts,              // Reference to the APVTS member
@@ -62,25 +86,42 @@ void PhaseVocoderAudioProcessorEditor::paint (juce::Graphics& g)
 
 void PhaseVocoderAudioProcessorEditor::resized()
 {
-    // Define bounds for the UI components
     int margin = 20;
     int controlWidth = (getWidth() - 3 * margin) / 2;
     int controlHeight = 150;
     int comboHeight = 25;
 
-    // Pitch shift ratio Slider
-    pitchShiftRatioSlider.setBounds(
-        margin, 
-        margin + 20, 
-        controlWidth, 
-        controlHeight - 20
-    );
+    if (pitchShiftRatioSlider.isVisible())
+    {
+        pitchShiftRatioSlider.setBounds(
+            margin, 
+            margin + 20, 
+            controlWidth, 
+            controlHeight - 20
+        );
+    }
 
-    // FFT Size ComboBox
     fftSizeComboBox.setBounds(
         margin * 2 + controlWidth, 
         margin + 20, 
         controlWidth, 
         comboHeight
     );
+
+    modeSelector.setBounds(
+        margin * 2 + controlWidth, 
+        margin + 60, 
+        controlWidth, 
+        comboHeight
+    );
+}
+
+void PhaseVocoderAudioProcessorEditor::updateModeUI()
+{
+    int selectedId = modeSelector.getSelectedId();
+
+    pitchShiftRatioSlider.setVisible(selectedId == 1);
+    pitchShiftRatioLabel.setVisible(selectedId == 1);
+
+    resized();
 }

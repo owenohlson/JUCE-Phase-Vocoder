@@ -1,16 +1,25 @@
 #pragma once
 #include <JuceHeader.h>
 
+enum class VocoderMode
+{
+    PitchShift,
+    Robotize,
+    Whisperize
+};
+
 class PhaseVocoder
 {
 public:
     PhaseVocoder(int fftSizeIn, double sampleRateIn, int numChannelsIn);
     void prepare(int fftSizeIn, double sampleRateIn, int numChannelsIn);
     void process(juce::AudioBuffer<float>& buffer);
+    
+    VocoderMode currentMode = VocoderMode::PitchShift;
+    void setMode(int modeIndex) { currentMode = static_cast<VocoderMode>(modeIndex); /*DBG("Current mode: " << modeIndex);*/ }
 
     int N = 2048; // FFT size
     juce::SmoothedValue<float> pitchShiftRatioSmoothed = 1.0f;
-    float lastpitchShiftRatio = pitchShiftRatioSmoothed.getCurrentValue();
     
 private:
     // === CONFIG === //
@@ -23,6 +32,7 @@ private:
     // === FFT + WINDOWS === //
     std::unique_ptr<juce::dsp::FFT> fft;
     std::vector<float> window;
+    std::vector<float> synthWindow;
     std::vector<float> dataTemp;
     std::vector<float> tempResampled;
     std::vector<float> centerFreqs;

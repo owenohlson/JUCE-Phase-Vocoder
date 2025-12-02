@@ -69,7 +69,6 @@ public:
     void setStateInformation (const void* data, int sizeInBytes) override;
 
     //==============================================================================
-    // void rebuildEngineInBackground();
 
     juce::UndoManager undoManager;
     static juce::AudioProcessorValueTreeState::ParameterLayout createParameterLayout();
@@ -87,20 +86,10 @@ public:
             auto* p = dynamic_cast<AudioParameterChoice*>(apvts.getParameter("FFT_SIZE"));
             newFFTSize = p->getCurrentChoiceName().getIntValue();
             DBG("Parameter " << parameterID << " changed to " << newFFTSize);
-
-            // // Stop audio processing safely
-            // suspendProcessing(true);
-
-            // // Rebuild synchronously
-            // engine = std::make_unique<PhaseVocoder>(N, sampleRate, numChannels);
-
-            // // Resume audio processing
-            // suspendProcessing(false);
         }
     }
 
     //==============================================================================
-    // Engine pointer
     std::unique_ptr<PhaseVocoder> engine;
 
 private:
