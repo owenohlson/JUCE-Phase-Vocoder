@@ -86,6 +86,8 @@ void PhaseVocoder::process(juce::AudioBuffer<float>& buffer)
     //     ",  outputReadPos = " << outputReadPos);
 
     float smoothPSR = pitchShiftRatioSmoothed.getCurrentValue();
+
+    // DBG("SmoothPSR = " << smoothPSR);
     // float smoothPSR = pitchShiftRatioSmoothed.getNextValue();
     synthesisHopSize = int(analysisHopSize * smoothPSR);
     // normFactor = analysisHopSize / sumSquared;

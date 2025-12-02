@@ -143,7 +143,6 @@ void PhaseVocoderAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
     // Update vocoder mode
     int modeIndex = static_cast<int>(*apvts.getRawParameterValue("MODE"));
     engine->setMode(modeIndex);
-    engine->process(buffer);
 
     if (fftResizePending.exchange(false))
         engine->prepare(N, sampleRate, numChannels);
