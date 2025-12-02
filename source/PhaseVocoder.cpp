@@ -60,12 +60,12 @@ void PhaseVocoder::prepare(int fftSizeIn, double sampleRateIn, int numChannelsIn
     sumSquared = 0.0f;
     for (int n = 0; n < N; ++n)
     {
-        float win = 0.5f * (1.0f - std::cos(2.0f * pi * n / (N - 1)));
+        float win = sqrt(0.5f * (1.0f - std::cos(2.0f * pi * n / (N - 1))));
         window[n] = win;
         sumSquared += win * win;
     }
 
-    normFactor = analysisHopSize / sumSquared;
+    float normFactor = 1.0f / (sumSquared / analysisHopSize);
 
     // for (int n = 0; n < N; ++n)
     //     synthWindow[n] = window[n] * normFactor;
@@ -91,7 +91,7 @@ void PhaseVocoder::process(juce::AudioBuffer<float>& buffer)
     // float smoothPSR = pitchShiftRatioSmoothed.getNextValue();
     synthesisHopSize = int(analysisHopSize * smoothPSR);
     // normFactor = analysisHopSize / sumSquared;
-    normFactor = 1.0f / (sumSquared / synthesisHopSize);
+    normFactor = 1.0f / (sumSquared / analysisHopSize);
 
     // Write input into circular buffer
     for (int i = 0; i < numSamples; ++i)
@@ -169,7 +169,7 @@ void PhaseVocoder::process(juce::AudioBuffer<float>& buffer)
             // IFFT
             fft->performRealOnlyInverseTransform(dataTemp.data());
 
-            if (currentMode == VocoderMode::PitchShift)
+            if (currentMode == VocoderMode::PitchShift && smoothPSR - 1.0f > 0.001)
             {
                 // Resample to match original duration
                 double outputLength = floor(N / smoothPSR);
