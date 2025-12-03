@@ -13,18 +13,21 @@ void PhaseVocoder::prepare(int fftSizeIn, double sampleRateIn, int numChannelsIn
     inputCircBuff.clear();
     outputCircBuff.clear();
 
+    DBG("PV prepare() called");
+
     N = fftSizeIn;
+    DBG("fftSize: " << fftSizeIn);
     sampleRate = sampleRateIn;
     numChannels = numChannelsIn;
 
     float smoothPSR = pitchShiftRatioSmoothed.getCurrentValue();
 
-    analysisHopSize  = N / 4;
+    analysisHopSize  = N / 8;
     synthesisHopSize = int(analysisHopSize * smoothPSR);
 
-    pitchShiftRatioSmoothed.reset(sampleRate, 0.0005f);
+    pitchShiftRatioSmoothed.reset(sampleRate, 0.000001f);
 
-    int minBufferSize = 2 * N + analysisHopSize * 4 * 2; // extra *2 is from max(synthesisHopSize, analysisHopSize) = 2* analysisHopSize
+    int minBufferSize = 8 * N;
 
     int fftOrder = (int) std::round(std::log2(N));
     fft = std::make_unique<juce::dsp::FFT>(fftOrder);
@@ -57,8 +60,8 @@ void PhaseVocoder::prepare(int fftSizeIn, double sampleRateIn, int numChannelsIn
     outputCircBuff.setSize(numChannels, minBufferSize);
 
     inputWritePos = inputReadPos = 0;
-    outputWritePos = 0;
-    outputReadPos = 2 * N;
+    outputWritePos = 2 * N;
+    outputReadPos = 0;
     samplesAccumulated = 0;
 
     // Hann window
@@ -66,7 +69,7 @@ void PhaseVocoder::prepare(int fftSizeIn, double sampleRateIn, int numChannelsIn
     sumSquared = 0.0f;
     for (int n = 0; n < N; ++n)
     {
-        float win = sqrt(0.5f * (1.0f - std::cos(2.0f * pi * n / (N - 1))));
+        float win = 0.5f * (1.0f - std::cos(2.0f * pi * n / (N - 1)));
         window[n] = win;
         sumSquared += win * win;
     }
@@ -91,10 +94,10 @@ void PhaseVocoder::process(juce::AudioBuffer<float>& buffer)
     //     ",  outputWritePos = " << outputWritePos <<
     //     ",  outputReadPos = " << outputReadPos);
 
-    float smoothPSR = pitchShiftRatioSmoothed.getCurrentValue();
+    // float smoothPSR = pitchShiftRatioSmoothed.getCurrentValue();
 
     // DBG("SmoothPSR = " << smoothPSR);
-    // float smoothPSR = pitchShiftRatioSmoothed.getNextValue();
+    float smoothPSR = pitchShiftRatioSmoothed.getNextValue();
     synthesisHopSize = int(analysisHopSize * smoothPSR);
     // normFactor = analysisHopSize / sumSquared;
     normFactor = 1.0f / (sumSquared / synthesisHopSize);
@@ -112,7 +115,7 @@ void PhaseVocoder::process(juce::AudioBuffer<float>& buffer)
     // Do vocoder analysis/synthesis whenever enough samples accumulated
     while (samplesAccumulated >= analysisHopSize)
     {
-        smoothPSR = pitchShiftRatioSmoothed.getNextValue();
+        // smoothPSR = pitchShiftRatioSmoothed.getNextValue();
 
         for (int ch = 0; ch < channels; ++ch)
         {
@@ -126,7 +129,7 @@ void PhaseVocoder::process(juce::AudioBuffer<float>& buffer)
             std::fill(analysisFrame[ch].begin() + N, analysisFrame[ch].end(), 0.0f);
 
             // 180 degree cyclic shift
-            // std::rotate(analysisFrame[ch].begin(), analysisFrame[ch].begin() + N/2, analysisFrame[ch].begin() + N);
+            std::rotate(analysisFrame[ch].begin(), analysisFrame[ch].begin() + N/2, analysisFrame[ch].begin() + N);
 
             // FFT
             fft->performRealOnlyForwardTransform(analysisFrame[ch].data());
@@ -188,7 +191,7 @@ void PhaseVocoder::process(juce::AudioBuffer<float>& buffer)
             fft->performRealOnlyInverseTransform(analysisFrame[ch].data());
 
             // Undo cyclic shift
-            // std::rotate(analysisFrame[ch].begin(), analysisFrame[ch].begin() + N/2, analysisFrame[ch].begin() + N);
+            std::rotate(analysisFrame[ch].begin(), analysisFrame[ch].begin() + N/2, analysisFrame[ch].begin() + N);
 
             juce::FloatVectorOperations::multiply (analysisFrame[ch].data(), window.data(), N);
 

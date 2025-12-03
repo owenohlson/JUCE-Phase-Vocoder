@@ -19,12 +19,12 @@ private:
     PhaseVocoderAudioProcessor& processorRef;
 
     juce::ComboBox modeSelector;
-    juce::Slider pitchShiftRatioSlider;
+    juce::Slider pitchShiftSlider;
     juce::ComboBox fftSizeComboBox;
 
-    juce::Label pitchShiftRatioLabel, fftSizeLabel, modeLabel;
+    juce::Label pitchShiftLabel, fftSizeLabel, modeLabel;
 
-    std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> pitchShiftRatioAttachment;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> pitchShiftAttachment;
     std::unique_ptr<juce::AudioProcessorValueTreeState::ComboBoxAttachment> fftSizeAttachment, modeAttachment;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (PhaseVocoderAudioProcessorEditor)

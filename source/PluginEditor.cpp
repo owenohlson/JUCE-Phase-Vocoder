@@ -31,21 +31,21 @@ PhaseVocoderAudioProcessorEditor::PhaseVocoderAudioProcessorEditor (PhaseVocoder
     // Call it once to set initial visibility
     updateModeUI();
 
-    // Pitch shift ratio slider
-    pitchShiftRatioAttachment = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(
+    // Pitch shift slider
+    pitchShiftAttachment = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(
         apvts,              // Reference to the APVTS member
-        "PITCH_SHIFT_RATIO",                // Parameter ID string
-        pitchShiftRatioSlider              // The UI component to connect
+        "PITCH_SHIFT",                // Parameter ID string
+        pitchShiftSlider              // The UI component to connect
     );
 
-    pitchShiftRatioSlider.setSliderStyle(juce::Slider::RotaryHorizontalVerticalDrag);
-    pitchShiftRatioSlider.setTextBoxStyle(juce::Slider::TextBoxBelow, true, 50, 20);
-    addAndMakeVisible(pitchShiftRatioSlider);
+    pitchShiftSlider.setSliderStyle(juce::Slider::RotaryHorizontalVerticalDrag);
+    pitchShiftSlider.setTextBoxStyle(juce::Slider::TextBoxBelow, true, 50, 20);
+    addAndMakeVisible(pitchShiftSlider);
 
-    pitchShiftRatioLabel.setText("Pitch Shift Ratio", juce::dontSendNotification);
-    pitchShiftRatioLabel.setJustificationType(juce::Justification::centred);
-    pitchShiftRatioLabel.attachToComponent(&pitchShiftRatioSlider, false);
-    addAndMakeVisible(pitchShiftRatioLabel);
+    pitchShiftLabel.setText("Pitch Shift (semitones)", juce::dontSendNotification);
+    pitchShiftLabel.setJustificationType(juce::Justification::centred);
+    pitchShiftLabel.attachToComponent(&pitchShiftSlider, false);
+    addAndMakeVisible(pitchShiftLabel);
 
     fftSizeComboBox.addItem("1024", 1);
     fftSizeComboBox.addItem("2048", 2);
@@ -90,9 +90,9 @@ void PhaseVocoderAudioProcessorEditor::resized()
     int controlHeight = 150;
     int comboHeight = 25;
 
-    if (pitchShiftRatioSlider.isVisible())
+    if (pitchShiftSlider.isVisible())
     {
-        pitchShiftRatioSlider.setBounds(
+        pitchShiftSlider.setBounds(
             margin, 
             margin + 20, 
             controlWidth, 
@@ -119,8 +119,8 @@ void PhaseVocoderAudioProcessorEditor::updateModeUI()
 {
     int selectedId = modeSelector.getSelectedId();
 
-    pitchShiftRatioSlider.setVisible(selectedId == 1);
-    pitchShiftRatioLabel.setVisible(selectedId == 1);
+    pitchShiftSlider.setVisible(selectedId == 1);
+    pitchShiftLabel.setVisible(selectedId == 1);
 
     resized();
 }

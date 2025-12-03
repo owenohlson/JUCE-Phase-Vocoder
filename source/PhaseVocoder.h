@@ -20,6 +20,9 @@ public:
 
     int N = 2048; // FFT size
     juce::SmoothedValue<float> pitchShiftRatioSmoothed = 1.0f;
+
+    std::deque<juce::AudioBuffer<float>> inputHistory;
+    const int maxHistoryBuffers = 20;  // Store last 20 buffers
     
 private:
     // === CONFIG === //
@@ -45,7 +48,7 @@ private:
 
     int inputWritePos, 
         inputReadPos, 
-        outputWritePos, 
+        outputWritePos,   
         outputReadPos, 
         samplesAccumulated = 0;
 

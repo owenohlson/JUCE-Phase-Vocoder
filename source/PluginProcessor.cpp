@@ -91,6 +91,8 @@ void PhaseVocoderAudioProcessor::prepareToPlay (double sampleRateIn, int samples
 
     numChannels = getTotalNumInputChannels();
 
+    DBG("PP prepare called");
+
     // Get choice indices for fftSize
     auto* p = dynamic_cast<AudioParameterChoice*>(apvts.getParameter("FFT_SIZE"));
     N = p->getCurrentChoiceName().getIntValue();
@@ -137,7 +139,8 @@ void PhaseVocoderAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
     }
 
     // Update pitch shift ratio
-    float psr = *apvts.getRawParameterValue("PITCH_SHIFT_RATIO");
+    float pitchShiftSemitones = *apvts.getRawParameterValue("PITCH_SHIFT");
+    float psr = std::pow(2.0f, pitchShiftSemitones / 12.0f);
     engine->pitchShiftRatioSmoothed.setTargetValue(psr);
 
     // Update vocoder mode
@@ -145,7 +148,11 @@ void PhaseVocoderAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
     engine->setMode(modeIndex);
 
     if (fftResizePending.exchange(false))
-        engine->prepare(N, sampleRate, numChannels);
+    {
+        // auto* p = dynamic_cast<juce::AudioParameterChoice*>(apvts.getParameter("FFT_SIZE"));
+        // int fftSize = p->getCurrentChoiceName().getIntValue();
+        engine->prepare(newFFTSize, sampleRate, numChannels);
+    }
     
     engine->process(buffer);
 }
@@ -165,13 +172,12 @@ juce::AudioProcessorEditor* PhaseVocoderAudioProcessor::createEditor()
 juce::AudioProcessorValueTreeState::ParameterLayout PhaseVocoderAudioProcessor::createParameterLayout()
 {
     std::vector<std::unique_ptr<juce::RangedAudioParameter>> params;
-    // layout.add (std::make_unique<AudioParameterChoice> ("mode", "PV Mode", StringArray {"Time Stretch", "Pitch Shift"}, 0));
     params.push_back(std::make_unique<juce::AudioParameterFloat>(
-        ParameterID {"PITCH_SHIFT_RATIO", 1},  // param ID
-        "Pitch Shift Ratio", // parameter name
-        0.5f, // min value
-        2.0f, // max value
-        1.0f // default value
+        ParameterID {"PITCH_SHIFT", 1},  // param ID
+        "Pitch Shift", // parameter name
+        -12.0f, // min value
+        12.0f, // max value
+        0.0f // default value
     ));
 
     params.push_back(std::make_unique<juce::AudioParameterChoice>(
