@@ -32,16 +32,21 @@ void PhaseVocoder::prepare(int fftSizeIn, double sampleRateIn, int numChannelsIn
     // Resize arrays
     window.resize(N);
     synthWindow.resize(N);
-    dataTemp.assign(2 * N, 0.0f);
+
     centerFreqs.resize(N/2 + 1);
 
+    analysisFrame.assign(numChannels, std::vector<float>(2 * N));
     phasePrev.assign(numChannels, std::vector<float>(N/2 + 1));
     magPrev.assign(numChannels, std::vector<float>(N/2 + 1));
+    mag.assign(numChannels, std::vector<float>(N/2 + 1));
+    phase.assign(numChannels, std::vector<float>(N/2 + 1));
+    synthesisSpectrum.assign(numChannels, std::vector<float>(N/2 + 1));
     deltaPhase.assign(numChannels, std::vector<float>(N/2 + 1));
     synthesisPhase.assign(numChannels, std::vector<float>(N/2 + 1));
 
     for (int ch = 0; ch < numChannels; ++ch)
     {
+        std::fill(analysisFrame[ch].begin(), analysisFrame[ch].end(), 0.0f);
         std::fill(synthesisPhase[ch].begin(), synthesisPhase[ch].end(), 0.0f);
         std::fill(phasePrev[ch].begin(),      phasePrev[ch].end(),      0.0f);
         std::fill(deltaPhase[ch].begin(),     deltaPhase[ch].end(),     0.0f);
@@ -52,7 +57,8 @@ void PhaseVocoder::prepare(int fftSizeIn, double sampleRateIn, int numChannelsIn
     outputCircBuff.setSize(numChannels, minBufferSize);
 
     inputWritePos = inputReadPos = 0;
-    outputWritePos = outputReadPos = 0;
+    outputWritePos = 0;
+    outputReadPos = 2 * N;
     samplesAccumulated = 0;
 
     // Hann window
@@ -65,7 +71,7 @@ void PhaseVocoder::prepare(int fftSizeIn, double sampleRateIn, int numChannelsIn
         sumSquared += win * win;
     }
 
-    float normFactor = 1.0f / (sumSquared / analysisHopSize);
+    float normFactor = 1.0f / (sumSquared / synthesisHopSize);
 
     // for (int n = 0; n < N; ++n)
     //     synthWindow[n] = window[n] * normFactor;
@@ -91,7 +97,7 @@ void PhaseVocoder::process(juce::AudioBuffer<float>& buffer)
     // float smoothPSR = pitchShiftRatioSmoothed.getNextValue();
     synthesisHopSize = int(analysisHopSize * smoothPSR);
     // normFactor = analysisHopSize / sumSquared;
-    normFactor = 1.0f / (sumSquared / analysisHopSize);
+    normFactor = 1.0f / (sumSquared / synthesisHopSize);
 
     // Write input into circular buffer
     for (int i = 0; i < numSamples; ++i)
@@ -114,19 +120,22 @@ void PhaseVocoder::process(juce::AudioBuffer<float>& buffer)
             for (int n = 0; n < N; ++n)
             {
                 int pos = (inputReadPos + n) % circSize;
-                dataTemp[n] = inputCircBuff.getSample(ch, pos) * window[n];
+                analysisFrame[ch][n] = inputCircBuff.getSample(ch, pos) * window[n];
             }
 
-            std::fill(dataTemp.begin() + N, dataTemp.end(), 0.0f);
+            std::fill(analysisFrame[ch].begin() + N, analysisFrame[ch].end(), 0.0f);
+
+            // 180 degree cyclic shift
+            // std::rotate(analysisFrame[ch].begin(), analysisFrame[ch].begin() + N/2, analysisFrame[ch].begin() + N);
 
             // FFT
-            fft->performRealOnlyForwardTransform(dataTemp.data());
+            fft->performRealOnlyForwardTransform(analysisFrame[ch].data());
 
             // Process bins
             for (int k = 0; k <= N/2; ++k)
             {
-                float real = dataTemp[2*k];
-                float imag = dataTemp[2*k + 1];
+                float real = analysisFrame[ch][2*k];
+                float imag = analysisFrame[ch][2*k + 1];
 
                 float mag   = std::sqrt(real*real + imag*imag);
                 float phase = std::atan2(imag, real);
@@ -160,16 +169,30 @@ void PhaseVocoder::process(juce::AudioBuffer<float>& buffer)
                 // float instFreq = deltaPhi / analysisHopSize;
                 
                 // Comment these out for no-op
-                dataTemp[2*k]     = mag * std::cos(synthesisPhase[ch][k]);
-                dataTemp[2*k + 1] = mag * std::sin(synthesisPhase[ch][k]);
+                if (k == 0 || k == N/2)
+                {
+                    // DC and Nyquist: keep real, imaginary should be zero
+                    analysisFrame[ch][2*k] = mag;
+                    analysisFrame[ch][2*k + 1] = 0.0f;
+                }
+                else
+                {
+                    analysisFrame[ch][2*k] = mag * std::cos(synthesisPhase[ch][k]);
+                    analysisFrame[ch][2*k + 1] = mag * std::sin(synthesisPhase[ch][k]);
+                }
 
                 phasePrev[ch][k] = phase;
             }
 
             // IFFT
-            fft->performRealOnlyInverseTransform(dataTemp.data());
+            fft->performRealOnlyInverseTransform(analysisFrame[ch].data());
 
-            if (currentMode == VocoderMode::PitchShift && smoothPSR - 1.0f > 0.001)
+            // Undo cyclic shift
+            // std::rotate(analysisFrame[ch].begin(), analysisFrame[ch].begin() + N/2, analysisFrame[ch].begin() + N);
+
+            juce::FloatVectorOperations::multiply (analysisFrame[ch].data(), window.data(), N);
+
+            if (currentMode == VocoderMode::PitchShift /*&& smoothPSR - 1.0f > 0.001*/)
             {
                 // Resample to match original duration
                 double outputLength = floor(N / smoothPSR);
@@ -182,8 +205,8 @@ void PhaseVocoder::process(juce::AudioBuffer<float>& buffer)
                     int ix = (int)std::floor(x);
                     float dx = float(x - ix);
 
-                    float s0 = dataTemp[ix];
-                    float s1 = dataTemp[(ix + 1) % N];
+                    float s0 = analysisFrame[ch][ix];
+                    float s1 = analysisFrame[ch][(ix + 1) % N];
 
                     tempResampled[n] = s0 + dx * (s1 - s0);
                 }
@@ -198,7 +221,7 @@ void PhaseVocoder::process(juce::AudioBuffer<float>& buffer)
                     // Must index window proportionally
                     int winIndex = int((double)n / outputLength * N);
                     winIndex = juce::jlimit(0, N-1, winIndex);
-                    outputCircBuff.setSample(ch, pos, prev + tempResampled[n] * window[winIndex] * normFactor);
+                    outputCircBuff.setSample(ch, pos, prev + tempResampled[n] * normFactor);
                 }
             }
             else
@@ -208,7 +231,7 @@ void PhaseVocoder::process(juce::AudioBuffer<float>& buffer)
                 {
                     int pos = (outputWritePos + n) % circSize;
                     float prev = outputCircBuff.getSample(ch, pos);
-                    outputCircBuff.setSample(ch, pos, prev + dataTemp[n] * window[n] * normFactor);
+                    outputCircBuff.setSample(ch, pos, prev + analysisFrame[ch][n] * normFactor);
                 }
             }
         }
