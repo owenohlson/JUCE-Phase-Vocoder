@@ -16,35 +16,30 @@ void PhaseVocoder::prepare(int fftSizeIn, double sampleRateIn, int numChannelsIn
     DBG("PV prepare() called");
 
     N = fftSizeIn;
-    DBG("fftSize: " << fftSizeIn);
+    DBG("fftSize: " << N);
     sampleRate = sampleRateIn;
     numChannels = numChannelsIn;
 
     float smoothPSR = pitchShiftRatioSmoothed.getCurrentValue();
 
-    analysisHopSize  = N / 8;
+    analysisHopSize  = N / 5;
     synthesisHopSize = int(analysisHopSize * smoothPSR);
 
     pitchShiftRatioSmoothed.reset(sampleRate, 0.000001f);
 
-    int minBufferSize = 8 * N;
+    int minBufferSize = 2 * N;
 
     int fftOrder = (int) std::round(std::log2(N));
     fft = std::make_unique<juce::dsp::FFT>(fftOrder);
 
     // Resize arrays
     window.resize(N);
-    synthWindow.resize(N);
-
     centerFreqs.resize(N/2 + 1);
 
     analysisFrame.assign(numChannels, std::vector<float>(2 * N));
     phasePrev.assign(numChannels, std::vector<float>(N/2 + 1));
     magPrev.assign(numChannels, std::vector<float>(N/2 + 1));
-    mag.assign(numChannels, std::vector<float>(N/2 + 1));
-    phase.assign(numChannels, std::vector<float>(N/2 + 1));
     synthesisSpectrum.assign(numChannels, std::vector<float>(N/2 + 1));
-    deltaPhase.assign(numChannels, std::vector<float>(N/2 + 1));
     synthesisPhase.assign(numChannels, std::vector<float>(N/2 + 1));
 
     for (int ch = 0; ch < numChannels; ++ch)
@@ -52,7 +47,6 @@ void PhaseVocoder::prepare(int fftSizeIn, double sampleRateIn, int numChannelsIn
         std::fill(analysisFrame[ch].begin(), analysisFrame[ch].end(), 0.0f);
         std::fill(synthesisPhase[ch].begin(), synthesisPhase[ch].end(), 0.0f);
         std::fill(phasePrev[ch].begin(),      phasePrev[ch].end(),      0.0f);
-        std::fill(deltaPhase[ch].begin(),     deltaPhase[ch].end(),     0.0f);
         std::fill(magPrev[ch].begin(),        magPrev[ch].end(),        0.0f);
     }
 
@@ -60,12 +54,11 @@ void PhaseVocoder::prepare(int fftSizeIn, double sampleRateIn, int numChannelsIn
     outputCircBuff.setSize(numChannels, minBufferSize);
 
     inputWritePos = inputReadPos = 0;
-    outputWritePos = 2 * N;
+    outputWritePos = N;
     outputReadPos = 0;
     samplesAccumulated = 0;
 
     // Hann window
-    // Add choice of window function?
     sumSquared = 0.0f;
     for (int n = 0; n < N; ++n)
     {
@@ -74,10 +67,7 @@ void PhaseVocoder::prepare(int fftSizeIn, double sampleRateIn, int numChannelsIn
         sumSquared += win * win;
     }
 
-    float normFactor = 1.0f / (sumSquared / synthesisHopSize);
-
-    // for (int n = 0; n < N; ++n)
-    //     synthWindow[n] = window[n] * normFactor;
+    normFactor = 1.0f / (sumSquared / synthesisHopSize);
 
     for (int k = 0; k <= N/2; ++k)
         centerFreqs[k] = (2.0f * pi * k) / N; // in rad/sample
@@ -89,18 +79,11 @@ void PhaseVocoder::process(juce::AudioBuffer<float>& buffer)
     const int circSize   = inputCircBuff.getNumSamples();
     const int channels   = buffer.getNumChannels();
 
-    // DBG("inputWritePos = " << inputWritePos <<
-    //     ",  inputReadPos = " << inputReadPos <<
-    //     ",  outputWritePos = " << outputWritePos <<
-    //     ",  outputReadPos = " << outputReadPos);
-
     // float smoothPSR = pitchShiftRatioSmoothed.getCurrentValue();
 
-    // DBG("SmoothPSR = " << smoothPSR);
     float smoothPSR = pitchShiftRatioSmoothed.getNextValue();
     synthesisHopSize = int(analysisHopSize * smoothPSR);
-    // normFactor = analysisHopSize / sumSquared;
-    normFactor = 1.0f / (sumSquared / synthesisHopSize);
+    normFactor = 1.0f / (sumSquared / (std::abs(synthesisHopSize - analysisHopSize) + analysisHopSize));
 
     // Write input into circular buffer
     for (int i = 0; i < numSamples; ++i)
@@ -148,9 +131,7 @@ void PhaseVocoder::process(juce::AudioBuffer<float>& buffer)
                 
                 float deviation = phase - targetPhase;
                 float deltaPhi = omega * analysisHopSize + princArg(deviation);
-                
-                // deltaPhase[ch][k] = deltaPhi;
-                
+                                
                 switch (currentMode)
                 {
                     case VocoderMode::PitchShift:
@@ -172,18 +153,10 @@ void PhaseVocoder::process(juce::AudioBuffer<float>& buffer)
                 // float instFreq = deltaPhi / analysisHopSize;
                 
                 // Comment these out for no-op
-                if (k == 0 || k == N/2)
-                {
-                    // DC and Nyquist: keep real, imaginary should be zero
-                    analysisFrame[ch][2*k] = mag;
-                    analysisFrame[ch][2*k + 1] = 0.0f;
-                }
-                else
-                {
-                    analysisFrame[ch][2*k] = mag * std::cos(synthesisPhase[ch][k]);
-                    analysisFrame[ch][2*k + 1] = mag * std::sin(synthesisPhase[ch][k]);
-                }
+                analysisFrame[ch][2*k] = mag * std::cos(synthesisPhase[ch][k]);
+                analysisFrame[ch][2*k + 1] = mag * std::sin(synthesisPhase[ch][k]);
 
+                magPrev[ch][k] = mag;
                 phasePrev[ch][k] = phase;
             }
 
@@ -195,7 +168,7 @@ void PhaseVocoder::process(juce::AudioBuffer<float>& buffer)
 
             juce::FloatVectorOperations::multiply (analysisFrame[ch].data(), window.data(), N);
 
-            if (currentMode == VocoderMode::PitchShift /*&& smoothPSR - 1.0f > 0.001*/)
+            if (currentMode == VocoderMode::PitchShift)
             {
                 // Resample to match original duration
                 double outputLength = floor(N / smoothPSR);
@@ -219,11 +192,6 @@ void PhaseVocoder::process(juce::AudioBuffer<float>& buffer)
                 {
                     int pos = (outputWritePos + n) % circSize;
                     float prev = outputCircBuff.getSample(ch, pos);
-
-                    // Window applied using n mapped to Hann domain
-                    // Must index window proportionally
-                    int winIndex = int((double)n / outputLength * N);
-                    winIndex = juce::jlimit(0, N-1, winIndex);
                     outputCircBuff.setSample(ch, pos, prev + tempResampled[n] * normFactor);
                 }
             }

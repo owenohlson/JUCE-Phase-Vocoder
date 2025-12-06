@@ -26,8 +26,8 @@ public:
     
 private:
     // === CONFIG === //
-    double sampleRate = 44100.0;
-    int analysisHopSize = N / 4;
+    double sampleRate = 48000.0;
+    int analysisHopSize = N / 8;
     int synthesisHopSize;
 
     int numChannels;
@@ -35,7 +35,6 @@ private:
     // === FFT + WINDOWS === //
     std::unique_ptr<juce::dsp::FFT> fft;
     std::vector<float> window;
-    std::vector<float> synthWindow;
     std::vector<std::vector<float>> analysisFrame;
     std::vector<float> tempResampled;
     std::vector<float> centerFreqs;
@@ -54,11 +53,8 @@ private:
 
     // === PHASE ARRAYS === //
     std::vector<std::vector<float>> phasePrev;
-    std::vector<std::vector<float>> mag;
-    std::vector<std::vector<float>> phase;
     std::vector<std::vector<float>> synthesisSpectrum;
     std::vector<std::vector<float>> magPrev;
-    std::vector<std::vector<float>> deltaPhase;
     std::vector<std::vector<float>> synthesisPhase;
     
     // === HELPERS === //

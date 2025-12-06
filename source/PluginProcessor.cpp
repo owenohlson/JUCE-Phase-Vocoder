@@ -148,11 +148,7 @@ void PhaseVocoderAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
     engine->setMode(modeIndex);
 
     if (fftResizePending.exchange(false))
-    {
-        // auto* p = dynamic_cast<juce::AudioParameterChoice*>(apvts.getParameter("FFT_SIZE"));
-        // int fftSize = p->getCurrentChoiceName().getIntValue();
         engine->prepare(newFFTSize, sampleRate, numChannels);
-    }
     
     engine->process(buffer);
 }
